@@ -21,6 +21,42 @@ def _sanitize_export_filename(name: str) -> str:
     return name[:128]
 
 
+# Blind-compare helper sessions are created with this name prefix. Their real
+# model must never surface in the session list / sidebar — otherwise a blind
+# comparison can be de-anonymized before the user votes (issue #1285).
+COMPARE_SESSION_PREFIX = "[CMP] "
+
+
+def _public_model(name: str, model: str) -> str:
+    """Blank out the real model of blind-compare helper sessions so the
+    session list can't be used to map a neutral pane label ("Model A") back
+    to its model. The Compare UI tracks models client-side, so hiding it here
+    costs the sidebar nothing. See issue #1285."""
+    if (name or "").startswith(COMPARE_SESSION_PREFIX):
+        return ""
+    return model
+
+
+def _content_to_text(content) -> str:
+    """Flatten a message's content to plain text for text-based exports.
+
+    History entries carry three shapes: a plain string, a multimodal list of
+    content blocks (vision/image attachments), or None (assistant turns that
+    persisted only native tool_calls). The txt/html/md exporters join and
+    string-munge this value, so a list crashed the export (TypeError on join,
+    AttributeError on .replace) and None rendered as the literal "None".
+    Coerce to the text blocks, returning "" for anything without text.
+    """
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "\n".join(
+            b.get("text", "") for b in content
+            if isinstance(b, dict) and b.get("text")
+        )
+    return ""
+
+
 def _verify_session_owner(request: Request, session_id: str, session_manager=None):
     """Verify the current user owns the session. Raises 404 if not.
 
@@ -57,7 +93,6 @@ def _verify_session_owner(request: Request, session_id: str, session_manager=Non
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["sessions"])
-
 
 def _current_user_is_admin(request: Request, user: str | None) -> bool:
     if not user:
@@ -104,6 +139,17 @@ def _persist_session_headers(session_id: str, headers: dict | None) -> None:
         raise
     finally:
         db.close()
+
+
+_HIDDEN_SYSTEM_SESSION_NAMES = {
+    "[Task] Chat Sessions Tidy",
+    "[Task] Documents Tidy",
+    "[Task] Memory Tidy",
+    "[Task] Research Tidy",
+    "[Task] Email Mark Boundaries",
+    "[Task] Email Tags",
+    "[Task] Skills Audit",
+}
 
 
 def _pick_endpoint_for_sort(owner=None):
@@ -215,7 +261,7 @@ def setup_session_routes(session_manager: SessionManager, config: dict, webhook_
         finally:
             db.close()
 
-        sessions = [{"id": s.id, "name": s.name, "model": s.model,
+        sessions = [{"id": s.id, "name": s.name, "model": _public_model(s.name, s.model),
                      "endpoint_url": s.endpoint_url, "rag": s.rag,
                      "archived": s.archived, "folder": folder_map.get(s.id),
                      "total_tokens": token_map.get(s.id, 0),
@@ -229,7 +275,8 @@ def setup_session_routes(session_manager: SessionManager, config: dict, webhook_
                      "message_count": msg_count_map.get(s.id, 0)}
                     for s in user_sessions.values()
                     if not s.archived
-                    and (s.name or "").strip() not in ("Nobody", "Incognito")]
+                    and (s.name or "").strip() not in ("Nobody", "Incognito")
+                    and (s.name or "").strip() not in _HIDDEN_SYSTEM_SESSION_NAMES]
 
         return sessions
     
@@ -692,7 +739,7 @@ def setup_session_routes(session_manager: SessionManager, config: dict, webhook_
             lines = []
             for m in session.history:
                 lines.append(f"[{m.role.upper()}]")
-                lines.append(m.content)
+                lines.append(_content_to_text(m.content))
                 lines.append("")
             out_name = filename or f"conversation_{safe_name}_{timestamp}.txt"
             return Response(
@@ -715,7 +762,7 @@ def setup_session_routes(session_manager: SessionManager, config: dict, webhook_
             ]
             for m in session.history:
                 cls = "user" if m.role == "user" else "ai"
-                content = m.content.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                content = _content_to_text(m.content).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
                 content = content.replace("\n", "<br>")
                 html_parts.append(f'<div class="msg {cls}"><div class="role">{m.role}</div>{content}</div>')
             html_parts.append("</body></html>")
@@ -734,7 +781,7 @@ def setup_session_routes(session_manager: SessionManager, config: dict, webhook_
         markdown_lines.append("\n---\n")
         for message in session.history:
             role = message.role.upper()
-            content = message.content
+            content = _content_to_text(message.content)
             markdown_lines.append(f"### {role}")
             markdown_lines.append(f"{content}\n")
             markdown_lines.append("---\n")

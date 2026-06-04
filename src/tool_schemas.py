@@ -399,7 +399,7 @@ FUNCTION_TOOL_SCHEMAS = [
                     "action_name": {"type": "string", "enum": [
                         "tidy_sessions", "tidy_documents", "consolidate_memory", "tidy_research",
                         "summarize_emails", "draft_email_replies", "extract_email_events",
-                        "classify_events", "mark_email_boundaries", "learn_sender_signatures",
+                        "classify_events", "learn_sender_signatures",
                         "test_skills", "audit_skills", "check_email_urgency"
                     ],
                                     "description": "Built-in action (for task_type=action)"},
@@ -422,7 +422,7 @@ FUNCTION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "manage_calendar",
-            "description": "Manage calendar events: list events in a date range, create, update, delete. Each event can carry a tag/category (event_type) and importance level. Use ISO 8601 datetimes; for all-day events set all_day=true and pass YYYY-MM-DD. For event reminders/alarms, pass reminder_minutes; the tool creates the Odysseus note reminder, so do not also call manage_notes for the same reminder.",
+            "description": "Manage calendar events: list events in a date range, create, update, delete. Each event can carry a tag/category (event_type) and importance level. Resolve relative dates like today/tomorrow against the 'Current date and time' system context, then pass ISO 8601 datetimes in the user's local wall time; for all-day events set all_day=true and pass YYYY-MM-DD. For event reminders/alarms, pass reminder_minutes; the tool creates the Odysseus note reminder, so do not also call manage_notes for the same reminder.",
             "parameters": {
                 "type": "object",
                 "properties": {
